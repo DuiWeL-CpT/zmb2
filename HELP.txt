@@ -1,0 +1,36 @@
+Documentation:
+
+=Initial Configurations
+	To specify the IRC server, port, nick and channel you should modify the main "zmb2bot.pl" source code.
+	E.G.: If you wanted to change the server to irc.freenode.net you would change it like this:  "my $server = 'irc.freenode.net'; "
+
+=Sending a command to bot
+	To give the commands (defined in the next section) to bot you need to tell it either via the specified channel or private messaging.
+
+=Supported Commands
+	*********
+	!bot <on | off>
+		Tells the bot if it should accept the commands sent or not. (default: off)
+	*********
+	!cmd <command>
+		This runs commands on victim's CMD/shell.
+	!perl <code>
+		Obvious, runs the code with the "eval" function in Perl.
+	!irc <commands>
+		Runs IRC commands like part, join, ...
+	!klg <file>
+		Logs pressed keys to file. (not working on Linux)
+	!klg
+		Stops key logging if you don't specify any filename.
+	!bg <text>
+		Converts the text to a picture with a green font and sets as the Windows wallpaper. (not working on Linux)
+	!up <file path>
+		Uploads the file specified and generates the shortened link.
+	!get <url> <save path>
+		Downloads the file from url and saves it to save path.
+	!qr <text or filename>
+		Generates QR from the text or filename if exists (uses api.qrserver.com)
+	!exit
+		the bot kills it self when it see this!
+	!selfremove
+		Bot would uninstall itself from the victim's system. (not working on Linux)
